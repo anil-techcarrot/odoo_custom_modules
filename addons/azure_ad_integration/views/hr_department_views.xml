@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- Add DL Email field to Department Form -->
+        <record id="view_department_form_dl_email" model="ir.ui.view">
+            <field name="name">hr.department.form.dl</field>
+            <field name="model">hr.department</field>
+            <field name="inherit_id" ref="hr.view_department_form"/>
+            <field name="arch" type="xml">
+                <!-- Add after Manager field -->
+                <xpath expr="//field[@name='manager_id']" position="after">
+                    <field name="azure_dl_email" readonly="1"
+                           attrs="{'invisible': [('azure_dl_email', '=', False)]}"/>
+                    <field name="azure_dl_id" invisible="1"/>
+                </xpath>
+            </field>
+        </record>
+
+        <!-- Add DL Email to Department Tree View -->
+        <record id="view_department_tree_dl_email" model="ir.ui.view">
+            <field name="name">hr.department.tree.dl</field>
+            <field name="model">hr.department</field>
+            <field name="inherit_id" ref="hr.view_department_tree"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='name']" position="after">
+                    <field name="azure_dl_email" optional="show"/>
+                </xpath>
+            </field>
+        </record>
+
+    </data>
+</odoo>
