@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_employee_form_azure_license" model="ir.ui.view">
+        <field name="name">hr.employee.form.azure.license</field>
+        <field name="model">hr.employee</field>
+        <field name="inherit_id" ref="hr.view_employee_form"/>
+        <field name="arch" type="xml">
+
+            <!-- Add license fields to employee form -->
+            <xpath expr="//field[@name='work_email']" position="after">
+                <field name="azure_email" readonly="1"/>
+                <field name="azure_user_id" readonly="1"/>
+                <field name="azure_license_assigned" readonly="1"/>
+                <field name="azure_license_name" readonly="1"
+                       attrs="{'invisible': [('azure_license_assigned', '=', False)]}"/>
+            </xpath>
+
+        </field>
+    </record>
+</odoo>
