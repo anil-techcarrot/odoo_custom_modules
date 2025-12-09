@@ -1,20 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
+    <!-- Add Azure AD Info Tab to Employee Form -->
     <record id="view_employee_form_azure_license" model="ir.ui.view">
         <field name="name">hr.employee.form.azure.license</field>
         <field name="model">hr.employee</field>
         <field name="inherit_id" ref="hr.view_employee_form"/>
         <field name="arch" type="xml">
 
-            <!-- Add license fields to employee form -->
-            <xpath expr="//field[@name='work_email']" position="after">
-                <field name="azure_email" readonly="1"/>
-                <field name="azure_user_id" readonly="1"/>
-                <field name="azure_license_assigned" readonly="1"/>
-                <field name="azure_license_name" readonly="1"
-                       attrs="{'invisible': [('azure_license_assigned', '=', False)]}"/>
+            <!-- Add Azure AD Info Tab -->
+            <xpath expr="//notebook" position="inside">
+                <page string="Azure AD Info" name="azure_ad_info">
+                    <group>
+                        <group string="Azure Account Details">
+                            <field name="azure_email" readonly="1"/>
+                            <field name="azure_user_id" readonly="1"/>
+                        </group>
+                        <group string="License Information">
+                            <field name="azure_license_assigned" readonly="1"/>
+                            <field name="azure_license_name" readonly="1"/>
+                        </group>
+                    </group>
+
+                    <!-- Add button to view in Azure Portal -->
+                    <group string="Quick Actions" attrs="{'invisible': [('azure_user_id', '=', False)]}">
+                        <button name="action_view_azure_user"
+                                type="object"
+                                string="View in Azure Portal"
+                                class="btn-primary"
+                                icon="fa-external-link"/>
+                    </group>
+                </page>
             </xpath>
 
+            <!-- Also add work email if not visible -->
+            <xpath expr="//field[@name='mobile_phone']" position="after">
+                <field name="work_email" invisible="0"/>
+            </xpath>
+
+        </field>
+    </record>
+
+    <!-- Add Azure fields to Employee List View -->
+    <record id="view_employee_tree_azure" model="ir.ui.view">
+        <field name="name">hr.employee.tree.azure</field>
+        <field name="model">hr.employee</field>
+        <field name="inherit_id" ref="hr.view_employee_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='work_email']" position="after">
+                <field name="azure_email" optional="show"/>
+                <field name="azure_license_assigned" optional="show"/>
+            </xpath>
         </field>
     </record>
 </odoo>
