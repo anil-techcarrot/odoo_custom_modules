@@ -1,6 +1,6 @@
 import requests
 import logging
-from odoo import models, fields, api
+from odoo import models, fields
 
 _logger = logging.getLogger(__name__)
 
@@ -10,8 +10,6 @@ class HRDepartment(models.Model):
 
     azure_dl_email = fields.Char("DL Email", readonly=True)
     azure_dl_id = fields.Char("DL ID", readonly=True)
-    auto_sync_dl = fields.Boolean("Auto-Sync DL", default=True,
-                                  help="Automatically find and link DL based on department name")
 
     def action_sync_dl_from_azure(self):
         """Find and link existing DL from Azure based on department name"""
@@ -102,14 +100,3 @@ class HRDepartment(models.Model):
                     'type': 'danger',
                 }
             }
-
-    @api.model_create_multi
-    def create(self, vals_list):
-        """Auto-sync DL when department is created - ODOO 19"""
-        departments = super().create(vals_list)
-
-        for dept in departments:
-            if dept.auto_sync_dl:
-                dept.action_sync_dl_from_azure()
-
-        return departments
