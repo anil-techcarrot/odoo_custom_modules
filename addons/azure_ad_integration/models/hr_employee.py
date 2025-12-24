@@ -381,3 +381,119 @@ class HREmployee(models.Model):
                 'url': f'https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/{self.azure_user_id}',
                 'target': 'new',
             }
+
+    def action_unassign_license(self):
+        """Button to unassign license from employee"""
+        self.ensure_one()
+
+        if not self.azure_user_id:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': 'No Azure user found',
+                    'type': 'warning',
+                }
+            }
+
+        if not self.azure_license_assigned:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': 'No license to unassign',
+                    'type': 'info',
+                }
+            }
+
+        result = self._unassign_azure_license()
+
+        if result:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': f'License unassigned from {self.name}',
+                    'type': 'success',
+                }
+            }
+        else:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': 'Failed to unassign license',
+                    'type': 'danger',
+                }
+            }
+
+    def _unassign_azure_license(self):
+        """Unassign license from Azure"""
+        self.ensure_one()
+
+        if not self.azure_user_id:
+            _logger.error(f"❌ No Azure User ID for {self.name}")
+            return False
+
+        params = self.env['ir.config_parameter'].sudo()
+        tenant = params.get_param("azure_tenant_id")
+        client = params.get_param("azure_client_id")
+        secret = params.get_param("azure_client_secret")
+        license_sku = params.get_param("azure_license_sku")
+
+        if not license_sku:
+            _logger.warning("⚠️ No license SKU configured")
+            return False
+
+        try:
+            token_resp = requests.post(
+                f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": client,
+                    "client_secret": secret,
+                    "scope": "https://graph.microsoft.com/.default"
+                },
+                timeout=30
+            ).json()
+
+            token = token_resp.get("access_token")
+            if not token:
+                _logger.error("❌ No token")
+                return False
+
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+
+            _logger.info(f"🔄 Unassigning license from {self.name}...")
+
+            license_payload = {
+                "addLicenses": [],
+                "removeLicenses": [license_sku]
+            }
+
+            license_response = requests.post(
+                f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}/assignLicense",
+                headers=headers,
+                json=license_payload,
+                timeout=30
+            )
+
+            if license_response.status_code == 200:
+                self.write({
+                    'azure_license_assigned': False,
+                    'azure_license_name': False
+                })
+                _logger.info(f"✅ License unassigned from {self.name}")
+                return True
+            else:
+                error_data = license_response.json().get('error', {})
+                error_msg = error_data.get('message', 'Unknown')
+                _logger.error(f"❌ Failed: {error_msg}")
+                return False
+
+        except Exception as e:
+            _logger.error(f"❌ Exception: {e}")
+            return False

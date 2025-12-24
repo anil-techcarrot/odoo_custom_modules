@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Employee Form - AUTOMATIC, NO MANUAL BUTTONS -->
+    <!-- Employee Form with License Management -->
     <record id="view_employee_form_azure_license" model="ir.ui.view">
         <field name="name">hr.employee.form.azure.license</field>
         <field name="model">hr.employee</field>
@@ -20,6 +20,18 @@
                             <field name="azure_license_name" readonly="1"
                                    invisible="azure_license_assigned == False"/>
                         </group>
+                    </group>
+
+                    <!-- License Management -->
+                    <group string="License Management">
+                        <!-- Unassign Button (shows when license exists) -->
+                        <button name="action_unassign_license"
+                                type="object"
+                                string="Unassign License"
+                                class="btn-warning"
+                                icon="fa-minus-circle"
+                                confirm="Remove license from this employee?"
+                                invisible="azure_license_assigned == False"/>
                     </group>
 
                     <group string="Quick Actions">
