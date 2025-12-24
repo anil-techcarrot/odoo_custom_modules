@@ -22,7 +22,7 @@
                 <!-- Add DL fields after manager -->
                 <xpath expr="//field[@name='manager_id']" position="after">
                     <group string="Azure Distribution List">
-                        <field name="auto_sync_dl"/>
+<!--                        <field name="auto_sync_dl"/>-->
                         <field name="azure_dl_email" readonly="1"/>
                         <field name="azure_dl_id" readonly="1" groups="base.group_no_one"/>
                     </group>
