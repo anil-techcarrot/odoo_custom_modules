@@ -11,28 +11,27 @@
             <xpath expr="//notebook" position="inside">
                 <page string="Azure AD Info" name="azure_ad_info">
                     <group>
-                        <group string="Azure Account">
+                        <group string="Azure Account Details">
                             <field name="azure_email" readonly="1"/>
                             <field name="azure_user_id" readonly="1"/>
                         </group>
-                        <group string="License Info">
-                            <field name="azure_license_assigned" readonly="1" widget="boolean"/>
+                        <group string="License Information">
+                            <field name="azure_license_assigned" readonly="1"/>
                             <field name="azure_license_name" readonly="1"
-                                   invisible="azure_license_assigned == False"/>
+                                   invisible="not azure_license_assigned"/>
                         </group>
                     </group>
 
                     <!-- License Management -->
                     <group string="License Management">
-                        <!-- Unassign Button (shows when license exists) -->
+                        <!-- Unassign Button (shows ONLY when license is assigned) -->
                         <button name="action_unassign_license"
                                 type="object"
                                 string="Unassign License"
                                 class="btn-warning"
                                 icon="fa-minus-circle"
-                                confirm="Remove license from this employee?"
-                                attrs="{'invisible': [('azure_license_assigned', '=', False)]}"/>
-                        <!--                                invisible="azure_license_assigned == False"/>-->
+                                confirm="Are you sure you want to remove the license from this employee?"
+                                invisible="not azure_license_assigned"/>
                     </group>
 
                     <group string="Quick Actions">
@@ -41,7 +40,7 @@
                                 string="View in Azure Portal"
                                 class="btn-primary"
                                 icon="fa-external-link"
-                                invisible="azure_user_id == False"/>
+                                invisible="not azure_user_id"/>
                     </group>
                 </page>
             </xpath>
@@ -57,7 +56,7 @@
         <field name="arch" type="xml">
             <xpath expr="//field[@name='work_email']" position="after">
                 <field name="azure_email" optional="show"/>
-                <field name="azure_license_assigned" optional="show" widget="boolean"/>
+                <field name="azure_license_assigned" optional="show"/>
                 <field name="azure_license_name" optional="hide"/>
             </xpath>
         </field>
