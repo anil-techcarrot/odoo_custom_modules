@@ -60,11 +60,11 @@ class HREmployee(models.Model):
         # If department has no DL configured, try to sync it automatically
         if not dept.azure_dl_id:
             _logger.info(f"🔄 Department '{dept.name}' has no DL, attempting auto-sync...")
-            # Call sync and refresh
+            # Call sync
             dept.action_sync_dl_from_azure()
 
-            # Refresh the record to get updated values
-            dept.refresh()
+            # Refresh the record to get updated values - FIXED
+            dept.invalidate_recordset()
 
             if not dept.azure_dl_id:
                 _logger.warning(f"⚠️ Could not sync DL for department '{dept.name}'")
