@@ -60,11 +60,11 @@ class HREmployee(models.Model):
         # If department has no DL configured, try to sync it automatically
         if not dept.azure_dl_id:
             _logger.info(f"🔄 Department '{dept.name}' has no DL, attempting auto-sync...")
-            # IMPORTANT: Commit the sync result
-            sync_result = dept.action_sync_dl_from_azure()
+            # Call sync and refresh
+            dept.action_sync_dl_from_azure()
 
-            # Refresh department to get updated values - FIXED LINE
-            dept._invalidate_cache(['azure_dl_id', 'azure_dl_email'])
+            # Refresh the record to get updated values
+            dept.refresh()
 
             if not dept.azure_dl_id:
                 _logger.warning(f"⚠️ Could not sync DL for department '{dept.name}'")
@@ -414,4 +414,128 @@ class HREmployee(models.Model):
             import traceback
             _logger.error(traceback.format_exc())
 
-    # ... (rest of the methods remain the same)
+    def action_view_azure_user(self):
+        """Open Azure AD user page"""
+        self.ensure_one()
+        if self.azure_user_id:
+            return {
+                'type': 'ir.actions.act_url',
+                'url': f'https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/{self.azure_user_id}',
+                'target': 'new',
+            }
+
+    def action_unassign_license(self):
+        """Button to unassign license from employee"""
+        self.ensure_one()
+
+        if not self.azure_user_id:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': 'No Azure user found',
+                    'type': 'warning',
+                }
+            }
+
+        if not self.azure_license_assigned:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': 'No license to unassign',
+                    'type': 'info',
+                }
+            }
+
+        result = self._unassign_azure_license()
+
+        if result:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': f'License unassigned from {self.name}',
+                    'type': 'success',
+                }
+            }
+        else:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': 'Failed to unassign license',
+                    'type': 'danger',
+                }
+            }
+
+    def _unassign_azure_license(self):
+        """Unassign license from Azure"""
+        self.ensure_one()
+
+        if not self.azure_user_id:
+            _logger.error(f"❌ No Azure User ID for {self.name}")
+            return False
+
+        params = self.env['ir.config_parameter'].sudo()
+        tenant = params.get_param("azure_tenant_id")
+        client = params.get_param("azure_client_id")
+        secret = params.get_param("azure_client_secret")
+        license_sku = params.get_param("azure_license_sku")
+
+        if not license_sku:
+            _logger.warning("⚠️ No license SKU configured")
+            return False
+
+        try:
+            token_resp = requests.post(
+                f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": client,
+                    "client_secret": secret,
+                    "scope": "https://graph.microsoft.com/.default"
+                },
+                timeout=30
+            ).json()
+
+            token = token_resp.get("access_token")
+            if not token:
+                _logger.error("❌ No token")
+                return False
+
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+
+            _logger.info(f"🔄 Unassigning license from {self.name}...")
+
+            license_payload = {
+                "addLicenses": [],
+                "removeLicenses": [license_sku]
+            }
+
+            license_response = requests.post(
+                f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}/assignLicense",
+                headers=headers,
+                json=license_payload,
+                timeout=30
+            )
+
+            if license_response.status_code == 200:
+                self.write({
+                    'azure_license_assigned': False,
+                    'azure_license_name': False
+                })
+                _logger.info(f"✅ License unassigned from {self.name}")
+                return True
+            else:
+                error_data = license_response.json().get('error', {})
+                error_msg = error_data.get('message', 'Unknown')
+                _logger.error(f"❌ Failed: {error_msg}")
+                return False
+
+        except Exception as e:
+            _logger.error(f"❌ Exception: {e}")
+            return False
