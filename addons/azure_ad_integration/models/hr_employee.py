@@ -529,7 +529,7 @@ class HREmployee(models.Model):
             }
 
     def _unassign_azure_license(self):
-        """Unassign license, disable account, and revoke all sessions"""
+        """Unassign license, disable account, and verify the changes"""
         self.ensure_one()
 
         if not self.azure_user_id:
@@ -547,6 +547,7 @@ class HREmployee(models.Model):
             return False
 
         try:
+            # Get token
             token_resp = requests.post(
                 f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
                 data={
@@ -556,11 +557,15 @@ class HREmployee(models.Model):
                     "scope": "https://graph.microsoft.com/.default"
                 },
                 timeout=30
-            ).json()
+            )
 
-            token = token_resp.get("access_token")
+            if token_resp.status_code != 200:
+                _logger.error(f"❌ Failed to get token: {token_resp.text}")
+                return False
+
+            token = token_resp.json().get("access_token")
             if not token:
-                _logger.error("❌ No token")
+                _logger.error("❌ No access token in response")
                 return False
 
             headers = {
@@ -568,8 +573,25 @@ class HREmployee(models.Model):
                 "Content-Type": "application/json"
             }
 
-            # STEP 1: Remove the license
-            _logger.info(f"🔄 Unassigning license from {self.name}...")
+            _logger.info(f"{'=' * 80}")
+            _logger.info(f"🔄 Starting license removal and account disable for {self.name}")
+            _logger.info(f"   User ID: {self.azure_user_id}")
+            _logger.info(f"{'=' * 80}")
+
+            # STEP 1: Check current account status
+            _logger.info(f"📋 Checking current account status...")
+            check_url = f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}"
+            check_response = requests.get(check_url, headers=headers, timeout=30)
+
+            if check_response.status_code == 200:
+                current_status = check_response.json()
+                _logger.info(f"   Current accountEnabled: {current_status.get('accountEnabled')}")
+                _logger.info(f"   Display Name: {current_status.get('displayName')}")
+            else:
+                _logger.error(f"❌ Cannot check user status: {check_response.status_code}")
+
+            # STEP 2: Remove the license
+            _logger.info(f"🔄 Step 1/3: Removing license...")
 
             license_payload = {
                 "addLicenses": [],
@@ -583,16 +605,18 @@ class HREmployee(models.Model):
                 timeout=30
             )
 
-            if license_response.status_code != 200:
+            if license_response.status_code == 200:
+                _logger.info(f"✅ License removed successfully")
+            else:
                 error_data = license_response.json().get('error', {})
                 error_msg = error_data.get('message', 'Unknown')
-                _logger.error(f"❌ Failed to remove license: {error_msg}")
-                return False
+                error_code = error_data.get('code', 'Unknown')
+                _logger.error(f"❌ Failed to remove license: [{error_code}] {error_msg}")
+                _logger.error(f"   Full response: {license_response.text}")
+                # Don't return False here - continue to disable account anyway
 
-            _logger.info(f"✅ License removed from {self.name}")
-
-            # STEP 2: Revoke all active sessions (sign out from all devices)
-            _logger.info(f"🔄 Revoking all sessions for {self.name}...")
+            # STEP 3: Revoke all sessions
+            _logger.info(f"🔄 Step 2/3: Revoking all active sessions...")
 
             revoke_response = requests.post(
                 f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}/revokeSignInSessions",
@@ -600,52 +624,73 @@ class HREmployee(models.Model):
                 timeout=30
             )
 
-            if revoke_response.status_code == 200:
-                _logger.info(f"✅ All sessions revoked for {self.name}")
+            if revoke_response.status_code == 200 or revoke_response.status_code == 204:
+                revoke_data = revoke_response.json() if revoke_response.text else {}
+                _logger.info(f"✅ Sessions revoked: {revoke_data.get('value', True)}")
             else:
-                _logger.warning(f"⚠️ Could not revoke sessions (may not be critical)")
+                _logger.warning(f"⚠️ Could not revoke sessions: {revoke_response.status_code}")
+                _logger.warning(f"   Response: {revoke_response.text}")
 
-            # STEP 3: Disable the account
-            _logger.info(f"🔄 Disabling Azure account for {self.name}...")
+            # STEP 4: Disable the account (CRITICAL)
+            _logger.info(f"🔄 Step 3/3: Disabling account...")
 
             disable_payload = {
                 "accountEnabled": False
             }
 
+            disable_url = f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}"
+            _logger.info(f"   PATCH URL: {disable_url}")
+            _logger.info(f"   Payload: {json.dumps(disable_payload)}")
+
             disable_response = requests.patch(
-                f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}",
+                disable_url,
                 headers=headers,
                 json=disable_payload,
                 timeout=30
             )
 
-            if disable_response.status_code == 200:
-                _logger.info(f"✅ Account disabled for {self.name}")
+            _logger.info(f"   Response Status: {disable_response.status_code}")
+            _logger.info(f"   Response Body: {disable_response.text[:500]}")
+
+            if disable_response.status_code == 200 or disable_response.status_code == 204:
+                _logger.info(f"✅ Account disable request sent successfully")
             else:
-                error_data = disable_response.json().get('error', {})
+                error_data = disable_response.json().get('error', {}) if disable_response.text else {}
                 error_msg = error_data.get('message', 'Unknown')
-                _logger.error(f"❌ Failed to disable account: {error_msg}")
+                error_code = error_data.get('code', 'Unknown')
+                _logger.error(f"❌ Failed to disable account: [{error_code}] {error_msg}")
+                _logger.error(f"   Full error response: {disable_response.text}")
 
-            # STEP 4: Block sign-in using Conditional Access (if needed)
-            # This requires additional permissions, but adds extra security
-            _logger.info(f"🔄 Blocking sign-in for {self.name}...")
+                # Check if it's a permissions issue
+                if 'Insufficient privileges' in error_msg or 'Authorization_RequestDenied' in error_code:
+                    _logger.error(f"⚠️ PERMISSION ISSUE DETECTED!")
+                    _logger.error(f"   Your Azure App Registration needs 'User.ReadWrite.All' permission")
+                    _logger.error(f"   Please grant this permission in Azure Portal")
 
-            block_payload = {
-                "accountEnabled": False,
-                "onPremisesExtensionAttributes": {
-                    "extensionAttribute1": "BLOCKED_BY_ODOO"
-                }
-            }
+            # STEP 5: Verify the changes
+            _logger.info(f"🔍 Verifying account status...")
+            import time
+            time.sleep(2)  # Wait 2 seconds for Azure to process
 
-            block_response = requests.patch(
+            verify_response = requests.get(
                 f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}",
                 headers=headers,
-                json=block_payload,
                 timeout=30
             )
 
-            if block_response.status_code == 200:
-                _logger.info(f"✅ Sign-in blocked for {self.name}")
+            if verify_response.status_code == 200:
+                verified_status = verify_response.json()
+                is_enabled = verified_status.get('accountEnabled')
+                _logger.info(f"   Verified accountEnabled: {is_enabled}")
+
+                if is_enabled == False:
+                    _logger.info(f"✅✅✅ ACCOUNT SUCCESSFULLY DISABLED ✅✅✅")
+                else:
+                    _logger.error(f"❌❌❌ ACCOUNT STILL ENABLED - DISABLE FAILED ❌❌❌")
+                    _logger.error(f"   This is a critical issue - user can still log in!")
+                    return False
+            else:
+                _logger.warning(f"⚠️ Could not verify account status")
 
             # Update Odoo record
             self.write({
@@ -653,17 +698,14 @@ class HREmployee(models.Model):
                 'azure_license_name': False
             })
 
-            _logger.info(f"=" * 60)
-            _logger.info(f"✅ COMPLETE: License removed and account disabled for {self.name}")
-            _logger.info(f"   - License: Removed")
-            _logger.info(f"   - Sessions: Revoked")
-            _logger.info(f"   - Account: Disabled")
-            _logger.info(f"=" * 60)
+            _logger.info(f"{'=' * 80}")
+            _logger.info(f"✅ PROCESS COMPLETED for {self.name}")
+            _logger.info(f"{'=' * 80}")
 
             return True
 
         except Exception as e:
-            _logger.error(f"❌ Exception: {e}")
+            _logger.error(f"❌ EXCEPTION OCCURRED: {e}")
             import traceback
-            _logger.error(traceback.format_exc())
+            _logger.error(f"Full traceback:\n{traceback.format_exc()}")
             return False
