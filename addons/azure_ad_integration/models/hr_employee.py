@@ -25,9 +25,8 @@ class HREmployee(models.Model):
                 # Step 1: Create Azure user
                 emp._create_azure_email()
 
-                # Step 2: Assign license automatically
-                if emp.azure_user_id:
-                    emp._check_and_assign_license()
+                # Step 2: LICENSE ASSIGNMENT NOW MANUAL - REMOVED!
+                # Admin must manually assign license via button
 
                 # Step 3: Add to department DL automatically
                 if emp.department_id and emp.azure_user_id:
@@ -723,3 +722,67 @@ class HREmployee(models.Model):
             import traceback
             _logger.error(f"Full traceback:\n{traceback.format_exc()}")
             return False
+
+    def action_assign_license(self):
+        """Button to manually assign license to employee"""
+        self.ensure_one()
+
+        if not self.azure_user_id:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': 'No Azure user found',
+                    'type': 'warning',
+                }
+            }
+
+        if self.azure_license_assigned:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': 'License already assigned',
+                    'type': 'info',
+                }
+            }
+
+        # Check if licenses are available
+        license_config = self.env['azure.license.config'].search([
+            ('available_licenses', '>', 0)
+        ], limit=1)
+
+        if not license_config:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': '⚠️ No licenses available! Please purchase more licenses or unassign from other users.',
+                    'type': 'warning',
+                    'sticky': True
+                }
+            }
+
+        result = self._check_and_assign_license()
+
+        if result:
+            # Refresh license count
+            self.env['azure.license.config'].search([]).action_sync_licenses_from_azure()
+
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': f'✅ License assigned to {self.name}',
+                    'type': 'success',
+                }
+            }
+        else:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'message': 'Failed to assign license',
+                    'type': 'danger',
+                }
+            }
