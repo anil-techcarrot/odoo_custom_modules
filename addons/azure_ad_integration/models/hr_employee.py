@@ -305,6 +305,20 @@ class HREmployee(models.Model):
             # License not found, assign it
             _logger.info(f"🔄 Assigning license to {self.name}...")
 
+            # Re-enable account if it was disabled (NEW CODE)
+            enable_payload = {"accountEnabled": True}
+            enable_response = requests.patch(
+                f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}",
+                headers=headers,
+                json=enable_payload,
+                timeout=30
+            )
+
+            if enable_response.status_code == 200:
+                _logger.info(f"✅ Account enabled for {self.name}")
+            else:
+                _logger.warning(f"⚠️ Could not enable account (may already be enabled)")
+
             license_payload = {
                 "addLicenses": [{
                     "skuId": license_sku,
@@ -500,7 +514,7 @@ class HREmployee(models.Model):
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'message': f'License unassigned from {self.name}',
+                    'message': f'License unassigned and account disabled for {self.name}',
                     'type': 'success',
                 }
             }
@@ -515,7 +529,7 @@ class HREmployee(models.Model):
             }
 
     def _unassign_azure_license(self):
-        """Unassign license from Azure"""
+        """Unassign license from Azure AND disable the account"""
         self.ensure_one()
 
         if not self.azure_user_id:
@@ -554,6 +568,7 @@ class HREmployee(models.Model):
                 "Content-Type": "application/json"
             }
 
+            # STEP 1: Remove the license
             _logger.info(f"🔄 Unassigning license from {self.name}...")
 
             license_payload = {
@@ -568,19 +583,46 @@ class HREmployee(models.Model):
                 timeout=30
             )
 
-            if license_response.status_code == 200:
-                self.write({
-                    'azure_license_assigned': False,
-                    'azure_license_name': False
-                })
-                _logger.info(f"✅ License unassigned from {self.name}")
-                return True
-            else:
+            if license_response.status_code != 200:
                 error_data = license_response.json().get('error', {})
                 error_msg = error_data.get('message', 'Unknown')
-                _logger.error(f"❌ Failed: {error_msg}")
+                _logger.error(f"❌ Failed to remove license: {error_msg}")
                 return False
+
+            _logger.info(f"✅ License unassigned from {self.name}")
+
+            # STEP 2: Disable the account
+            _logger.info(f"🔄 Disabling Azure account for {self.name}...")
+
+            disable_payload = {
+                "accountEnabled": False
+            }
+
+            disable_response = requests.patch(
+                f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}",
+                headers=headers,
+                json=disable_payload,
+                timeout=30
+            )
+
+            if disable_response.status_code == 200:
+                _logger.info(f"✅ Account disabled for {self.name}")
+            else:
+                error_data = disable_response.json().get('error', {})
+                error_msg = error_data.get('message', 'Unknown')
+                _logger.error(f"❌ Failed to disable account: {error_msg}")
+                # Continue anyway since license was removed
+
+            # Update Odoo record
+            self.write({
+                'azure_license_assigned': False,
+                'azure_license_name': False
+            })
+
+            return True
 
         except Exception as e:
             _logger.error(f"❌ Exception: {e}")
+            import traceback
+            _logger.error(traceback.format_exc())
             return False
