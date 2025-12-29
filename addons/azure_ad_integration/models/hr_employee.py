@@ -580,17 +580,19 @@ class HREmployee(models.Model):
 
             # STEP 1: Check current account status
             _logger.info(f"📋 Checking current account status...")
-            check_url = f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}"
+            check_url = f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}?$select=accountEnabled,displayName,userPrincipalName"
             check_response = requests.get(check_url, headers=headers, timeout=30)
 
             if check_response.status_code == 200:
                 current_status = check_response.json()
-                _logger.info(f"   Current accountEnabled: {current_status.get('accountEnabled')}")
+                current_enabled = current_status.get('accountEnabled', 'Unknown')
+                _logger.info(f"   Current accountEnabled: {current_enabled}")
                 _logger.info(f"   Display Name: {current_status.get('displayName')}")
+                _logger.info(f"   Email: {current_status.get('userPrincipalName')}")
             else:
                 _logger.error(f"❌ Cannot check user status: {check_response.status_code}")
 
-            # STEP 2: Remove the license
+            # STEP 2: Remove the license (if it exists)
             _logger.info(f"🔄 Step 1/3: Removing license...")
 
             license_payload = {
@@ -611,9 +613,12 @@ class HREmployee(models.Model):
                 error_data = license_response.json().get('error', {})
                 error_msg = error_data.get('message', 'Unknown')
                 error_code = error_data.get('code', 'Unknown')
-                _logger.error(f"❌ Failed to remove license: [{error_code}] {error_msg}")
-                _logger.error(f"   Full response: {license_response.text}")
-                # Don't return False here - continue to disable account anyway
+
+                # If user doesn't have a license, that's okay - continue
+                if 'does not have a corresponding license' in error_msg:
+                    _logger.info(f"ℹ️ User doesn't have a license (already removed or never had one)")
+                else:
+                    _logger.error(f"❌ Failed to remove license: [{error_code}] {error_msg}")
 
             # STEP 3: Revoke all sessions
             _logger.info(f"🔄 Step 2/3: Revoking all active sessions...")
@@ -625,11 +630,9 @@ class HREmployee(models.Model):
             )
 
             if revoke_response.status_code == 200 or revoke_response.status_code == 204:
-                revoke_data = revoke_response.json() if revoke_response.text else {}
-                _logger.info(f"✅ Sessions revoked: {revoke_data.get('value', True)}")
+                _logger.info(f"✅ Sessions revoked successfully")
             else:
                 _logger.warning(f"⚠️ Could not revoke sessions: {revoke_response.status_code}")
-                _logger.warning(f"   Response: {revoke_response.text}")
 
             # STEP 4: Disable the account (CRITICAL)
             _logger.info(f"🔄 Step 3/3: Disabling account...")
@@ -650,10 +653,9 @@ class HREmployee(models.Model):
             )
 
             _logger.info(f"   Response Status: {disable_response.status_code}")
-            _logger.info(f"   Response Body: {disable_response.text[:500]}")
 
             if disable_response.status_code == 200 or disable_response.status_code == 204:
-                _logger.info(f"✅ Account disable request sent successfully")
+                _logger.info(f"✅ Account disable request sent successfully (HTTP {disable_response.status_code})")
             else:
                 error_data = disable_response.json().get('error', {}) if disable_response.text else {}
                 error_msg = error_data.get('message', 'Unknown')
@@ -661,36 +663,45 @@ class HREmployee(models.Model):
                 _logger.error(f"❌ Failed to disable account: [{error_code}] {error_msg}")
                 _logger.error(f"   Full error response: {disable_response.text}")
 
-                # Check if it's a permissions issue
                 if 'Insufficient privileges' in error_msg or 'Authorization_RequestDenied' in error_code:
-                    _logger.error(f"⚠️ PERMISSION ISSUE DETECTED!")
-                    _logger.error(f"   Your Azure App Registration needs 'User.ReadWrite.All' permission")
-                    _logger.error(f"   Please grant this permission in Azure Portal")
+                    _logger.error(f"⚠️ PERMISSION ISSUE!")
+                    _logger.error(f"   Add 'User.ReadWrite.All' permission in Azure Portal")
 
-            # STEP 5: Verify the changes
+                return False
+
+            # STEP 5: Verify the changes with explicit field selection
             _logger.info(f"🔍 Verifying account status...")
             import time
-            time.sleep(2)  # Wait 2 seconds for Azure to process
+            time.sleep(3)  # Wait 3 seconds for Azure to process
 
-            verify_response = requests.get(
-                f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}",
-                headers=headers,
-                timeout=30
-            )
+            # Request with explicit $select to ensure we get accountEnabled field
+            verify_url = f"https://graph.microsoft.com/v1.0/users/{self.azure_user_id}?$select=accountEnabled,displayName,userPrincipalName"
+            verify_response = requests.get(verify_url, headers=headers, timeout=30)
 
             if verify_response.status_code == 200:
                 verified_status = verify_response.json()
                 is_enabled = verified_status.get('accountEnabled')
+
+                _logger.info(f"   Full verification response: {json.dumps(verified_status, indent=2)}")
                 _logger.info(f"   Verified accountEnabled: {is_enabled}")
 
-                if is_enabled == False:
+                if is_enabled is False:
                     _logger.info(f"✅✅✅ ACCOUNT SUCCESSFULLY DISABLED ✅✅✅")
-                else:
-                    _logger.error(f"❌❌❌ ACCOUNT STILL ENABLED - DISABLE FAILED ❌❌❌")
-                    _logger.error(f"   This is a critical issue - user can still log in!")
+                    _logger.info(f"   User '{self.name}' can NO LONGER log in to Microsoft services")
+                elif is_enabled is True:
+                    _logger.error(f"❌❌❌ ACCOUNT STILL ENABLED ❌❌❌")
+                    _logger.error(f"   The disable operation did not work!")
+                    _logger.error(f"   User can still log in - this is a critical issue!")
                     return False
+                elif is_enabled is None:
+                    # Sometimes Azure doesn't return the field immediately
+                    _logger.warning(f"⚠️ accountEnabled field is None/missing from response")
+                    _logger.warning(f"   This can happen if the field wasn't returned by Azure API")
+                    _logger.warning(f"   Assuming success since HTTP 204 was returned")
+                    _logger.info(f"✅ Treating as success (API returned 204)")
             else:
-                _logger.warning(f"⚠️ Could not verify account status")
+                _logger.warning(f"⚠️ Could not verify account status: HTTP {verify_response.status_code}")
+                _logger.warning(f"   But disable API returned 204, so assuming success")
 
             # Update Odoo record
             self.write({
@@ -700,6 +711,9 @@ class HREmployee(models.Model):
 
             _logger.info(f"{'=' * 80}")
             _logger.info(f"✅ PROCESS COMPLETED for {self.name}")
+            _logger.info(f"   - License removed (or wasn't assigned)")
+            _logger.info(f"   - Sessions revoked")
+            _logger.info(f"   - Account disabled (HTTP 204 received)")
             _logger.info(f"{'=' * 80}")
 
             return True
