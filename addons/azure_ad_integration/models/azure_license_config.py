@@ -1,6 +1,7 @@
 import requests
 import logging
 from odoo import models, fields, api
+from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ class AzureLicenseConfig(models.Model):
             record.available_licenses = record.total_licenses - record.assigned_licenses
 
     def action_sync_licenses_from_azure(self):
-        """Fetch license info from Azure - works from any record or list view"""
+        """Fetch license info from Azure - callable from any record"""
         params = self.env['ir.config_parameter'].sudo()
         tenant = params.get_param("azure_tenant_id")
         client = params.get_param("azure_client_id")
@@ -34,7 +35,7 @@ class AzureLicenseConfig(models.Model):
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'message': '⚠️ Azure credentials missing in System Parameters',
+                    'message': ' Azure credentials missing in System Parameters',
                     'type': 'danger',
                     'sticky': True
                 }
@@ -42,7 +43,7 @@ class AzureLicenseConfig(models.Model):
 
         try:
             _logger.info("=" * 80)
-            _logger.info("🔄 Starting Azure license sync...")
+            _logger.info(" Starting Azure license sync...")
 
             # Get token
             token_resp = requests.post(
@@ -57,8 +58,7 @@ class AzureLicenseConfig(models.Model):
             )
 
             if token_resp.status_code != 200:
-                _logger.error(f"❌ Token request failed: {token_resp.status_code}")
-                _logger.error(f"   Response: {token_resp.text}")
+                _logger.error(f" Token request failed: {token_resp.status_code}")
                 return {
                     'type': 'ir.actions.client',
                     'tag': 'display_notification',
@@ -70,7 +70,7 @@ class AzureLicenseConfig(models.Model):
 
             token = token_resp.json().get("access_token")
             if not token:
-                _logger.error("❌ No token in response")
+                _logger.error(" No token in response")
                 return {
                     'type': 'ir.actions.client',
                     'tag': 'display_notification',
@@ -90,14 +90,12 @@ class AzureLicenseConfig(models.Model):
                 timeout=30
             )
 
-            _logger.info(f"   Response status: {response.status_code}")
-
             if response.status_code == 200:
                 skus = response.json().get('value', [])
                 _logger.info(f"   Found {len(skus)} license types in Azure")
 
                 if not skus:
-                    _logger.warning("⚠️ No SKUs returned from Azure")
+                    _logger.warning(" No SKUs returned from Azure")
                     return {
                         'type': 'ir.actions.client',
                         'tag': 'display_notification',
@@ -108,8 +106,8 @@ class AzureLicenseConfig(models.Model):
                     }
 
                 # Clear old records
-                old_records = self.env['azure.license.config'].search([])
-                _logger.info(f"🗑️ Deleting {len(old_records)} old records...")
+                old_records = self.search([])
+                _logger.info(f" Deleting {len(old_records)} old records...")
                 old_records.unlink()
 
                 # Create new records for each license
@@ -120,9 +118,9 @@ class AzureLicenseConfig(models.Model):
                     total = sku.get('prepaidUnits', {}).get('enabled', 0)
                     consumed = sku.get('consumedUnits', 0)
 
-                    _logger.info(f"   📦 {license_name}: {consumed}/{total} assigned")
+                    _logger.info(f"    {license_name}: {consumed}/{total} assigned (SKU: {sku_id})")
 
-                    self.env['azure.license.config'].create({
+                    self.create({
                         'license_name': license_name,
                         'license_sku': sku_id,
                         'total_licenses': total,
@@ -131,23 +129,19 @@ class AzureLicenseConfig(models.Model):
                     })
                     created_count += 1
 
-                _logger.info(f"✅ Successfully synced {created_count} license types")
+                _logger.info(f" Successfully synced {created_count} license types")
                 _logger.info("=" * 80)
 
                 return {
                     'type': 'ir.actions.client',
                     'tag': 'display_notification',
                     'params': {
-                        'message': f'✅ Successfully synced {created_count} license types from Azure',
+                        'message': f' Successfully synced {created_count} license types from Azure',
                         'type': 'success',
-                        'sticky': False
                     }
                 }
             else:
-                error_msg = response.text
-                _logger.error(f"❌ Failed to get licenses: {response.status_code}")
-                _logger.error(f"   Error: {error_msg}")
-
+                _logger.error(f" Failed to get licenses: {response.status_code}")
                 return {
                     'type': 'ir.actions.client',
                     'tag': 'display_notification',
@@ -157,18 +151,8 @@ class AzureLicenseConfig(models.Model):
                     }
                 }
 
-        except requests.exceptions.Timeout:
-            _logger.error("❌ Request timeout")
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'message': 'Request timeout - Azure API did not respond',
-                    'type': 'danger',
-                }
-            }
         except Exception as e:
-            _logger.error(f"❌ Exception: {e}")
+            _logger.error(f" Exception: {e}")
             import traceback
             _logger.error(traceback.format_exc())
 

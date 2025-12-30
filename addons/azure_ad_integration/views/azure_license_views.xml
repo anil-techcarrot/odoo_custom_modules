@@ -9,16 +9,17 @@
                 <header>
                     <button name="action_sync_licenses_from_azure"
                             type="object"
-                            string="🔄 Sync from Azure"
+                            string=" Sync from Azure"
                             class="btn-primary"
                             help="Click here to fetch license information from Microsoft Azure"/>
                 </header>
                 <field name="license_name" string="License Type"/>
+                <field name="license_sku" string="SKU ID"/>
                 <field name="total_licenses" string="Total"/>
                 <field name="assigned_licenses" string="Assigned"/>
                 <field name="available_licenses" string="Available"
                        decoration-danger="available_licenses &lt; 5"
-                       decoration-warning="available_licenses &lt; 10 and available_licenses &gt;= 5"
+                       decoration-warning="available_licenses &gt;= 5 and available_licenses &lt; 10"
                        decoration-success="available_licenses &gt;= 10"/>
                 <field name="last_sync" string="Last Updated"/>
             </list>
@@ -34,7 +35,7 @@
                 <header>
                     <button name="action_sync_licenses_from_azure"
                             type="object"
-                            string="🔄 Sync from Azure"
+                            string=" Sync from Azure"
                             class="btn-primary"/>
                 </header>
                 <sheet>
@@ -67,14 +68,13 @@
         <field name="context">{}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
-                📊 No license information available yet
+                 No license information available yet
             </p>
             <p>
-                Click the <strong>"🔄 Sync from Azure"</strong> button above to fetch license information from Microsoft
-                Azure.
+                Click the <strong>" Sync from Azure"</strong> button above to fetch license information from Microsoft Azure.
             </p>
             <p>
-                After syncing, you'll see all available Microsoft 365 licenses here.
+                After syncing, you'll see all available Microsoft 365 licenses with their SKU IDs here.
             </p>
         </field>
     </record>
@@ -84,13 +84,6 @@
               name="Azure AD"
               sequence="100"
               groups="hr.group_hr_user,hr.group_hr_manager"/>
-
-<!--    <menuitem id="menu_azure_licenses_config"-->
-<!--              name="Azure License Management"-->
-<!--              parent="hr.menu_hr_configuration"-->
-<!--              action="action_azure_license_dashboard"-->
-<!--              groups="hr.group_hr_user,hr.group_hr_manager"-->
-<!--              sequence="100"/>-->
 
     <!-- SUBMENU for License Management -->
     <menuitem id="menu_azure_licenses"
