@@ -43,6 +43,12 @@
                     </group>
 
                     <group string="Quick Actions">
+
+                        <button name="%(azure_ad_integration.action_azure_license_dashboard)d"
+                                type="action"
+                                string="View Azure Licenses"
+                                class="btn-info"
+                                icon="fa-eye"/>
                         <button name="action_view_azure_user"
                                 type="object"
                                 string="View in Azure Portal"
