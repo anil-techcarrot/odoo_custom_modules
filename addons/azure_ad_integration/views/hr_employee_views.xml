@@ -22,44 +22,51 @@
                         </group>
                     </group>
 
-                    <!-- License Management -->
+                    <!-- License Management Section -->
                     <group string="License Management">
-                        <!-- Assign Button (shows when no license) -->
+                        <div class="alert alert-info" role="alert"
+                             invisible="azure_license_assigned == True or azure_user_id == False">
+                            <p><strong>ℹ️ License Not Assigned</strong></p>
+                            <p>Before assigning a license, please check available licenses in <strong>Azure AD → License Management</strong></p>
+                        </div>
+
+                        <!-- Assign Button -->
                         <button name="action_assign_license"
                                 type="object"
                                 string="✅ Assign License"
                                 class="btn-success"
                                 icon="fa-plus-circle"
-                                confirm="Assign Microsoft 365 license to this employee?"
-                                invisible="azure_license_assigned == True or azure_user_id == False"/>
+                                confirm="Are you sure you want to assign a Microsoft 365 license to this employee?"
+                                invisible="azure_license_assigned == True or azure_user_id == False"
+                                help="This will assign an available Microsoft 365 license"/>
 
-                        <!-- Unassign Button (shows when license exists) -->
+                        <!-- Unassign Button -->
                         <button name="action_unassign_license"
                                 type="object"
                                 string="❌ Unassign License"
                                 class="btn-warning"
                                 icon="fa-minus-circle"
-                                confirm="This will remove the license and DISABLE the account. Continue?"
-                                invisible="azure_license_assigned == False"/>
+                                confirm="This will remove the license and DISABLE the user account. Are you sure?"
+                                invisible="azure_license_assigned == False"
+                                help="This will remove the license and disable the Azure account"/>
                     </group>
 
-                    <group string="Quick Actions">
-                        <!-- View Licenses Button -->
+                    <!-- Quick Actions -->
+                    <group string="Quick Actions" col="2">
                         <button name="%(azure_ad_integration.action_azure_license_dashboard)d"
                                 type="action"
-                                string="📊 View Azure Licenses"
-                                class="btn-info"
+                                string="📊 View All Licenses"
+                                class="btn-info btn-block"
                                 icon="fa-eye"
-                                help="View all available Microsoft 365 licenses"/>
+                                help="Open the license management dashboard to see all available licenses"/>
 
-                        <!-- View in Portal Button -->
                         <button name="action_view_azure_user"
                                 type="object"
                                 string="🌐 View in Azure Portal"
-                                class="btn-primary"
+                                class="btn-primary btn-block"
                                 icon="fa-external-link"
                                 invisible="azure_user_id == False"
-                                help="Open this user in Azure Active Directory portal"/>
+                                help="Open this user's profile in Azure Active Directory portal"/>
                     </group>
                 </page>
             </xpath>
