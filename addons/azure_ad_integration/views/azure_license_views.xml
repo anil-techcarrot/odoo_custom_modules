@@ -70,7 +70,8 @@
                 📊 No license information available yet
             </p>
             <p>
-                Click the <strong>"🔄 Sync from Azure"</strong> button above to fetch license information from Microsoft Azure.
+                Click the <strong>"🔄 Sync from Azure"</strong> button above to fetch license information from Microsoft
+                Azure.
             </p>
             <p>
                 After syncing, you'll see all available Microsoft 365 licenses here.
@@ -83,6 +84,13 @@
               name="Azure AD"
               sequence="100"
               groups="hr.group_hr_user,hr.group_hr_manager"/>
+
+    <menuitem id="menu_azure_licenses_config"
+              name="Azure License Management"
+              parent="hr.menu_hr_configuration"
+              action="action_azure_license_dashboard"
+              groups="hr.group_hr_user,hr.group_hr_manager"
+              sequence="100"/>
 
     <!-- SUBMENU for License Management -->
     <menuitem id="menu_azure_licenses"
