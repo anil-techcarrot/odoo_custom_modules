@@ -34,7 +34,7 @@ class AzureLicenseConfig(models.Model):
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'message': '⚠️ Azure credentials missing in System Parameters',
+                    'message': ' Azure credentials missing in System Parameters',
                     'type': 'danger',
                     'sticky': True
                 }
@@ -42,7 +42,7 @@ class AzureLicenseConfig(models.Model):
 
         try:
             _logger.info("=" * 80)
-            _logger.info("🔄 Starting Azure license sync...")
+            _logger.info(" Starting Azure license sync...")
 
             # Get token
             token_resp = requests.post(
@@ -57,7 +57,7 @@ class AzureLicenseConfig(models.Model):
             )
 
             if token_resp.status_code != 200:
-                _logger.error(f"❌ Token request failed: {token_resp.status_code}")
+                _logger.error(f" Token request failed: {token_resp.status_code}")
                 _logger.error(f"   Response: {token_resp.text}")
                 return {
                     'type': 'ir.actions.client',
@@ -70,7 +70,7 @@ class AzureLicenseConfig(models.Model):
 
             token = token_resp.json().get("access_token")
             if not token:
-                _logger.error("❌ No token in response")
+                _logger.error(" No token in response")
                 return {
                     'type': 'ir.actions.client',
                     'tag': 'display_notification',
@@ -97,7 +97,7 @@ class AzureLicenseConfig(models.Model):
                 _logger.info(f"   Found {len(skus)} license types in Azure")
 
                 if not skus:
-                    _logger.warning("⚠️ No SKUs returned from Azure")
+                    _logger.warning(" No SKUs returned from Azure")
                     return {
                         'type': 'ir.actions.client',
                         'tag': 'display_notification',
@@ -120,7 +120,7 @@ class AzureLicenseConfig(models.Model):
                     total = sku.get('prepaidUnits', {}).get('enabled', 0)
                     consumed = sku.get('consumedUnits', 0)
 
-                    _logger.info(f"   📦 {license_name}: {consumed}/{total} assigned")
+                    _logger.info(f"   {license_name}: {consumed}/{total} assigned")
 
                     self.env['azure.license.config'].create({
                         'license_name': license_name,
@@ -131,21 +131,21 @@ class AzureLicenseConfig(models.Model):
                     })
                     created_count += 1
 
-                _logger.info(f"✅ Successfully synced {created_count} license types")
+                _logger.info(f" Successfully synced {created_count} license types")
                 _logger.info("=" * 80)
 
                 return {
                     'type': 'ir.actions.client',
                     'tag': 'display_notification',
                     'params': {
-                        'message': f'✅ Successfully synced {created_count} license types from Azure',
+                        'message': f'Successfully synced {created_count} license types from Azure',
                         'type': 'success',
                         'sticky': False
                     }
                 }
             else:
                 error_msg = response.text
-                _logger.error(f"❌ Failed to get licenses: {response.status_code}")
+                _logger.error(f" Failed to get licenses: {response.status_code}")
                 _logger.error(f"   Error: {error_msg}")
 
                 return {
@@ -158,7 +158,7 @@ class AzureLicenseConfig(models.Model):
                 }
 
         except requests.exceptions.Timeout:
-            _logger.error("❌ Request timeout")
+            _logger.error(" Request timeout")
             return {
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
@@ -168,7 +168,7 @@ class AzureLicenseConfig(models.Model):
                 }
             }
         except Exception as e:
-            _logger.error(f"❌ Exception: {e}")
+            _logger.error(f" Exception: {e}")
             import traceback
             _logger.error(traceback.format_exc())
 
