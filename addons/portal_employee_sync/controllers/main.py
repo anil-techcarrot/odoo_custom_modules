@@ -42,12 +42,10 @@ class PortalEmployeeSyncController(http.Controller):
                       request.httprequest.headers.get('API-Key') or \
                       request.httprequest.headers.get('Authorization', '').replace('Bearer ', '')
 
-            _logger.info("=" * 50)
-            _logger.info("NEW EMPLOYEE API REQUEST")
-            _logger.info("=" * 50)
+            _logger.info("========== NEW EMPLOYEE REQUEST ==========")
+            _logger.info(f"API Key: {api_key}")
 
             if not api_key or not self._verify_api_key(api_key):
-                _logger.error("❌ Invalid API key")
                 return self._json_response({'error': 'Invalid API key', 'status': 401}, 401)
 
             try:
@@ -55,17 +53,17 @@ class PortalEmployeeSyncController(http.Controller):
                     data = json.loads(request.httprequest.data.decode('utf-8'))
                 else:
                     data = request.httprequest.form.to_dict()
-                _logger.info(f"📥 RAW DATA:\n{json.dumps(data, indent=2)}")
+                _logger.info(f"📥 Data: {json.dumps(data, indent=2)}")
             except Exception as e:
-                _logger.error(f"❌ JSON parse error: {e}")
                 return self._json_response({'error': f'Invalid JSON: {str(e)}', 'status': 400}, 400)
 
             if not data.get('name'):
-                _logger.error("❌ Name field missing")
                 return self._json_response({'error': 'Name required', 'status': 400}, 400)
 
-            # SEARCH FOR EXISTING (EXACT MATCH ONLY)
+            # SEARCH FOR EXISTING TO PREVENT DUPLICATES
             existing_employee = None
+
+            # Search by email first
             if data.get('email'):
                 existing_employee = request.env['hr.employee'].sudo().search([
                     ('work_email', '=', data.get('email'))
@@ -73,56 +71,48 @@ class PortalEmployeeSyncController(http.Controller):
                 if existing_employee:
                     _logger.info(f"✅ FOUND by email: {existing_employee.name} (ID: {existing_employee.id})")
 
+            # Then by exact name
             if not existing_employee and data.get('name'):
                 existing_employee = request.env['hr.employee'].sudo().search([
-                    ('name', '=', data.get('name'))  # EXACT match only
+                    ('name', '=', data.get('name'))
                 ], limit=1)
                 if existing_employee:
                     _logger.info(f"✅ FOUND by name: {existing_employee.name} (ID: {existing_employee.id})")
 
             is_update = bool(existing_employee)
             if is_update:
-                _logger.info(f"🔄 MODE: UPDATE (ID: {existing_employee.id})")
+                _logger.info(f"🔄 MODE: UPDATE")
                 employee = existing_employee
             else:
-                _logger.info("🆕 MODE: CREATE NEW")
+                _logger.info("🆕 MODE: CREATE")
 
-            # BUILD VALUES WITH EXTRACTION
-            name_val = self._extract_sharepoint_value(data.get('name')) or data.get('name')
-            email_val = self._extract_sharepoint_value(data.get('email')) or data.get('email')
-            phone_val = self._extract_sharepoint_value(data.get('phone')) or data.get('phone')
-            dept_val = self._extract_sharepoint_value(data.get('department')) or data.get('department')
-            job_val = self._extract_sharepoint_value(data.get('job_title')) or data.get('job_title')
-
-            _logger.info(f"📝 Extracted name: '{name_val}'")
-            _logger.info(f"📝 Extracted email: '{email_val}'")
-            _logger.info(f"📝 Extracted phone: '{phone_val}'")
-            _logger.info(f"📝 Extracted department: '{dept_val}'")
-            _logger.info(f"📝 Extracted job: '{job_val}'")
-
+            # BUILD VALUES
             employee_vals = {
-                'name': name_val,
-                'work_email': email_val,
-                'mobile_phone': phone_val,
-                'department_id': self._get_or_create_department(dept_val),
-                'job_id': self._get_or_create_job(job_val),
-                'employee_type': 'employee',  # CRITICAL FOR ODOO 19
+                'name': data.get('name'),
+                'work_email': data.get('email'),
+                'mobile_phone': data.get('phone'),
+                'department_id': self._get_or_create_department(data.get('department')),
+                'job_id': self._get_or_create_job(data.get('job_title')),
+                'employee_type': 'employee',  # ⭐ CRITICAL FOR ODOO 19
                 'active': True,
             }
 
-            _logger.info("✅ Set employee_type='employee' and active=True for Odoo 19")
+            _logger.info("✅ Set employee_type='employee' and active=True")
 
             # Name fields
-            for field in ['employee_first_name', 'employee_middle_name', 'employee_last_name']:
-                if data.get(field):
-                    val = self._extract_sharepoint_value(data.get(field)) or data.get(field)
-                    employee_vals[field] = val
-                    _logger.info(f"✓ {field}: {val}")
+            if data.get('employee_first_name'):
+                employee_vals['employee_first_name'] = data.get('employee_first_name')
+
+            if data.get('employee_middle_name'):
+                employee_vals['employee_middle_name'] = data.get('employee_middle_name')
+
+            if data.get('employee_last_name'):
+                employee_vals['employee_last_name'] = data.get('employee_last_name')
 
             # GENDER
             if data.get('sex'):
                 gender_raw = self._extract_sharepoint_value(data.get('sex'))
-                _logger.info(f"📝 Gender RAW: '{data.get('sex')}' → EXTRACTED: '{gender_raw}'")
+                _logger.info(f"📝 Gender: RAW='{data.get('sex')}' EXT='{gender_raw}'")
 
                 if gender_raw:
                     gender_value = str(gender_raw).lower().strip()
@@ -130,8 +120,6 @@ class PortalEmployeeSyncController(http.Controller):
                     if gender_value in gender_mapping:
                         employee_vals['gender'] = gender_mapping[gender_value]
                         _logger.info(f"✅ Gender SET: {gender_mapping[gender_value]}")
-                    else:
-                        _logger.warning(f"⚠️ Invalid gender: '{gender_value}'")
 
             # BIRTHDAY
             if data.get('birthday'):
@@ -151,12 +139,11 @@ class PortalEmployeeSyncController(http.Controller):
 
             if data.get('place_of_birth'):
                 employee_vals['place_of_birth'] = data.get('place_of_birth')
-                _logger.info(f"✓ Place of birth: {data.get('place_of_birth')}")
 
             # MARITAL
             if data.get('marital'):
                 marital_raw = self._extract_sharepoint_value(data.get('marital'))
-                _logger.info(f"📝 Marital RAW: '{data.get('marital')}' → EXTRACTED: '{marital_raw}'")
+                _logger.info(f"📝 Marital: RAW='{data.get('marital')}' EXT='{marital_raw}'")
 
                 if marital_raw:
                     marital_value = str(marital_raw).lower().strip()
@@ -168,8 +155,6 @@ class PortalEmployeeSyncController(http.Controller):
                     if marital_value in marital_mapping:
                         employee_vals['marital'] = marital_mapping[marital_value]
                         _logger.info(f"✅ Marital SET: {marital_mapping[marital_value]}")
-                    else:
-                        _logger.warning(f"⚠️ Invalid marital: '{marital_value}'")
 
             if data.get('private_email'):
                 employee_vals['private_email'] = data.get('private_email')
@@ -177,10 +162,12 @@ class PortalEmployeeSyncController(http.Controller):
             # COUNTRY
             if data.get('country_id'):
                 country_raw = self._extract_sharepoint_value(data.get('country_id'))
-                _logger.info(f"📝 Country RAW: '{data.get('country_id')}' → EXTRACTED: '{country_raw}'")
+                _logger.info(f"📝 Country: RAW='{data.get('country_id')}' EXT='{country_raw}'")
 
                 if country_raw:
                     country_name = str(country_raw).strip()
+
+                    # Nationality mapping
                     nationality_map = {
                         'indian': 'India', 'american': 'United States', 'british': 'United Kingdom',
                         'emirati': 'United Arab Emirates', 'pakistani': 'Pakistan',
@@ -190,11 +177,13 @@ class PortalEmployeeSyncController(http.Controller):
                     if country_name.lower() in nationality_map:
                         country_name = nationality_map[country_name.lower()]
 
-                    country = request.env['res.country'].sudo().search([('name', '=', country_name)], limit=1)
-                    if not country:
-                        country = request.env['res.country'].sudo().search([
-                            '|', ('name', 'ilike', country_name), ('code', '=ilike', country_name)
-                        ], limit=1)
+                    country = request.env['res.country'].sudo().search([
+                        '|', '|',
+                        ('name', '=ilike', country_name),
+                        ('name', 'ilike', country_name),
+                        ('code', '=ilike', country_name)
+                    ], limit=1)
+
                     if country:
                         employee_vals['country_id'] = country.id
                         _logger.info(f"✅ Country SET: {country.name}")
@@ -202,7 +191,7 @@ class PortalEmployeeSyncController(http.Controller):
             # MOTHER TONGUE
             if data.get('mother_tongue_id'):
                 lang_raw = self._extract_sharepoint_value(data.get('mother_tongue_id'))
-                _logger.info(f"📝 Mother Tongue RAW: '{data.get('mother_tongue_id')}' → EXTRACTED: '{lang_raw}'")
+                _logger.info(f"📝 Mother Tongue: RAW='{data.get('mother_tongue_id')}' EXT='{lang_raw}'")
 
                 if lang_raw:
                     lang_name = str(lang_raw).strip()
@@ -214,19 +203,16 @@ class PortalEmployeeSyncController(http.Controller):
                     if lang:
                         employee_vals['mother_tongue_id'] = lang.id
                         _logger.info(f"✅ Mother Tongue SET: {lang.name}")
-                    else:
-                        _logger.warning(f"⚠️ Mother tongue '{lang_name}' not found")
 
             # LANGUAGES KNOWN
             if data.get('language_known_ids'):
                 try:
                     lang_raw = self._extract_sharepoint_value(data.get('language_known_ids'))
-                    _logger.info(f"📝 Languages RAW: '{data.get('language_known_ids')}' → EXTRACTED: '{lang_raw}'")
+                    _logger.info(f"📝 Languages: RAW='{data.get('language_known_ids')}' EXT='{lang_raw}'")
 
                     if lang_raw:
                         lang_string = str(lang_raw).strip()
                         lang_names = [l.strip() for l in lang_string.split(',') if l.strip()]
-                        _logger.info(f"📋 Split languages: {lang_names}")
 
                         if lang_names:
                             found_langs = request.env['res.lang'].sudo()
@@ -238,9 +224,6 @@ class PortalEmployeeSyncController(http.Controller):
                                 ], limit=1)
                                 if lang:
                                     found_langs |= lang
-                                    _logger.info(f"  ✓ Found: {lang.name}")
-                                else:
-                                    _logger.warning(f"  ✗ Not found: {lang_name}")
 
                             if found_langs:
                                 employee_vals['language_known_ids'] = [(6, 0, found_langs.ids)]
@@ -249,11 +232,11 @@ class PortalEmployeeSyncController(http.Controller):
                     _logger.error(f"❌ Languages error: {e}")
 
             # CREATE OR UPDATE
-            _logger.info(f"📦 Final values:\n{json.dumps(employee_vals, default=str, indent=2)}")
+            _logger.info(f"📦 Values: {json.dumps(employee_vals, default=str, indent=2)}")
 
             if is_update:
-                _logger.info(f"🔄 UPDATING employee ID: {employee.id}")
-                employee.sudo().write(employee_vals)
+                _logger.info(f"🔄 UPDATING ID: {employee.id}")
+                employee.write(employee_vals)
                 _logger.info(f"✅ UPDATED: {employee.name} (ID: {employee.id})")
                 message = 'Employee updated successfully'
                 status = 'updated'
@@ -261,14 +244,11 @@ class PortalEmployeeSyncController(http.Controller):
                 _logger.info("🆕 CREATING new employee")
                 employee = request.env['hr.employee'].sudo().create(employee_vals)
                 _logger.info(f"✅ CREATED: {employee.name} (ID: {employee.id})")
-                _logger.info(f"   Type: {employee.employee_type}")
-                _logger.info(f"   Active: {employee.active}")
+                _logger.info(f"   Type: {employee.employee_type}, Active: {employee.active}")
                 message = 'Employee created successfully'
                 status = 'created'
 
-            _logger.info("=" * 50)
-            _logger.info("REQUEST COMPLETE")
-            _logger.info("=" * 50)
+            _logger.info("========== COMPLETE ==========\n")
 
             return self._json_response({
                 'success': True,
@@ -300,7 +280,7 @@ class PortalEmployeeSyncController(http.Controller):
             })
 
         except Exception as e:
-            _logger.error(f"❌ FATAL ERROR: {str(e)}", exc_info=True)
+            _logger.error(f"❌ ERROR: {str(e)}", exc_info=True)
             return self._json_response({'error': str(e), 'status': 500}, 500)
 
     @http.route('/api/employees', type='http', auth='public', methods=['GET'], csrf=False, cors='*')
