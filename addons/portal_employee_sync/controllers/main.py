@@ -13,17 +13,83 @@ class PortalEmployeeSyncController(http.Controller):
         valid_key = "d7ce6e48fe7b6dd95283f5c36f6dd791aa83cf65"
         return api_key == valid_key
 
+    def _extract_sharepoint_value(self, field_data):
+        """Extract 'Value' from SharePoint JSON object if present"""
+        if not field_data:
+            return None
+
+        # Handle empty strings
+        if field_data == '':
+            return None
+
+        # If it's already a simple string/value, check if it's JSON
+        if isinstance(field_data, str):
+            field_data = field_data.strip()
+
+            # Check if it's a JSON string containing "Value"
+            if field_data.startswith('{') and '"Value"' in field_data:
+                try:
+                    parsed = json.loads(field_data)
+                    value = parsed.get('Value', field_data)
+                    return value if value != '' else None
+                except:
+                    return field_data
+            return field_data if field_data != '' else None
+
+        # If it's a dict, extract Value
+        if isinstance(field_data, dict):
+            value = field_data.get('Value', field_data)
+            return value if value != '' else None
+
+        return field_data
+
+    def _find_existing_employee(self, data):
+        """Find existing employee to prevent duplicates"""
+        _logger.info(f"🔍 Searching for existing employee...")
+
+        # Priority 1: Search by work email (most reliable)
+        if data.get('email') and data.get('email').strip():
+            employee = request.env['hr.employee'].sudo().search([
+                ('work_email', '=', data.get('email').strip())
+            ], limit=1)
+            if employee:
+                _logger.info(f"✅ Found by email: {employee.name} (ID: {employee.id})")
+                return employee
+
+        # Priority 2: Search by exact name
+        if data.get('name') and data.get('name').strip():
+            employee = request.env['hr.employee'].sudo().search([
+                ('name', '=', data.get('name').strip())
+            ], limit=1)
+            if employee:
+                _logger.info(f"✅ Found by name: {employee.name} (ID: {employee.id})")
+                return employee
+
+        # Priority 3: Search by first + last name combination
+        if data.get('employee_first_name') and data.get('employee_last_name'):
+            first = data.get('employee_first_name').strip()
+            last = data.get('employee_last_name').strip()
+            employee = request.env['hr.employee'].sudo().search([
+                ('employee_first_name', '=', first),
+                ('employee_last_name', '=', last)
+            ], limit=1)
+            if employee:
+                _logger.info(f"✅ Found by first+last: {employee.name} (ID: {employee.id})")
+                return employee
+
+        _logger.info(f"❌ No existing employee found")
+        return False
+
     @http.route('/api/employees', type='http', auth='public', methods=['POST'], csrf=False, cors='*')
     def create_employee(self, **kwargs):
-        """Create employee from external system with all SharePoint fields"""
+        """Create or update employee from SharePoint"""
         try:
-            # Get API key from headers
+            # Get API key
             api_key = request.httprequest.headers.get('api-key') or \
                       request.httprequest.headers.get('API-Key') or \
                       request.httprequest.headers.get('Authorization', '').replace('Bearer ', '')
 
             _logger.info(f"========== NEW EMPLOYEE REQUEST ==========")
-            _logger.info(f"Received API Key: {api_key}")
 
             if not api_key or not self._verify_api_key(api_key):
                 return self._json_response({
@@ -31,14 +97,14 @@ class PortalEmployeeSyncController(http.Controller):
                     'status': 401
                 }, 401)
 
-            # Parse JSON data from request body
+            # Parse JSON data
             try:
                 if request.httprequest.data:
                     data = json.loads(request.httprequest.data.decode('utf-8'))
                 else:
                     data = request.httprequest.form.to_dict()
 
-                _logger.info(f"📥 Received data: {json.dumps(data, indent=2)}")
+                _logger.info(f"📥 RAW data received: {json.dumps(data, indent=2)}")
             except Exception as e:
                 return self._json_response({
                     'error': f'Invalid JSON: {str(e)}',
@@ -52,64 +118,94 @@ class PortalEmployeeSyncController(http.Controller):
                     'status': 400
                 }, 400)
 
-            # BASE EMPLOYEE DATA
-            employee_vals = {
-                'name': data.get('name'),
-                'work_email': data.get('email'),
-                'mobile_phone': data.get('phone'),
-                'department_id': self._get_or_create_department(data.get('department')),
-                'job_id': self._get_or_create_job(data.get('job_title')),
-            }
+            # ═══════════════════════════════════════════════════════════
+            # CHECK FOR EXISTING EMPLOYEE
+            # ═══════════════════════════════════════════════════════════
+            existing_employee = self._find_existing_employee(data)
 
-            # SHAREPOINT NAME FIELDS
+            if existing_employee:
+                _logger.info(f"📝 MODE: UPDATE (existing employee ID: {existing_employee.id})")
+                is_update = True
+                employee = existing_employee
+            else:
+                _logger.info(f"🆕 MODE: CREATE (new employee)")
+                is_update = False
+                employee = None
+
+            # ═══════════════════════════════════════════════════════════
+            # BUILD EMPLOYEE VALUES
+            # ═══════════════════════════════════════════════════════════
+            employee_vals = {}
+
+            # Basic fields
+            if data.get('name'):
+                employee_vals['name'] = data.get('name')
+
+            if data.get('email'):
+                employee_vals['work_email'] = data.get('email')
+
+            if data.get('phone'):
+                employee_vals['mobile_phone'] = data.get('phone')
+
+            # Department
+            if data.get('department'):
+                dept_id = self._get_or_create_department(data.get('department'))
+                if dept_id:
+                    employee_vals['department_id'] = dept_id
+
+            # Job Title
+            if data.get('job_title'):
+                job_id = self._get_or_create_job(data.get('job_title'))
+                if job_id:
+                    employee_vals['job_id'] = job_id
+
+            # Name fields
             if data.get('employee_first_name'):
                 employee_vals['employee_first_name'] = data.get('employee_first_name')
-                _logger.info(f"✓ First Name: {data.get('employee_first_name')}")
 
             if data.get('employee_middle_name'):
                 employee_vals['employee_middle_name'] = data.get('employee_middle_name')
-                _logger.info(f"✓ Middle Name: {data.get('employee_middle_name')}")
 
             if data.get('employee_last_name'):
                 employee_vals['employee_last_name'] = data.get('employee_last_name')
-                _logger.info(f"✓ Last Name: {data.get('employee_last_name')}")
 
-            # GENDER - IMPROVED MAPPING
+            # ═══════════════════════════════════════════════════════════
+            # GENDER - WITH SHAREPOINT EXTRACTION
+            # ═══════════════════════════════════════════════════════════
             if data.get('sex'):
-                gender_value = str(data.get('sex')).lower().strip()
-                _logger.info(f"📝 Processing gender: '{gender_value}'")
+                gender_raw = self._extract_sharepoint_value(data.get('sex'))
+                _logger.info(f"📝 Gender: RAW='{data.get('sex')}' → EXTRACTED='{gender_raw}'")
 
-                gender_mapping = {
-                    'male': 'male',
-                    'm': 'male',
-                    'female': 'female',
-                    'f': 'female',
-                    'other': 'other',
-                }
+                if gender_raw:
+                    gender_value = str(gender_raw).lower().strip()
 
-                mapped_gender = gender_mapping.get(gender_value)
-                if mapped_gender:
-                    employee_vals['gender'] = mapped_gender
-                    _logger.info(f"✅ Gender set to: {mapped_gender}")
-                else:
-                    _logger.warning(f"⚠️ Invalid gender value: '{gender_value}'")
+                    gender_mapping = {
+                        'male': 'male',
+                        'm': 'male',
+                        'female': 'female',
+                        'f': 'female',
+                        'other': 'other',
+                    }
 
-            # BIRTHDAY - MULTIPLE FORMAT SUPPORT
+                    mapped_gender = gender_mapping.get(gender_value)
+                    if mapped_gender:
+                        employee_vals['gender'] = mapped_gender
+                        _logger.info(f"✅ Gender: {mapped_gender}")
+
+            # ═══════════════════════════════════════════════════════════
+            # BIRTHDAY
+            # ═══════════════════════════════════════════════════════════
             if data.get('birthday'):
                 try:
                     from datetime import datetime
                     birthday_str = str(data.get('birthday')).strip()
-                    _logger.info(f"📝 Processing birthday: '{birthday_str}'")
 
-                    date_obj = None
                     date_formats = [
-                        '%m/%d/%Y',  # 01/15/1990
-                        '%Y-%m-%d',  # 1990-01-15
-                        '%d/%m/%Y',  # 15/01/1990
-                        '%Y/%m/%d',  # 1990/01/15
-                        '%d-%m-%Y',  # 15-01-1990
+                        '%m/%d/%Y', '%Y-%m-%d', '%d/%m/%Y',
+                        '%Y/%m/%d', '%d-%m-%Y'
                     ]
 
+                    date_obj = None
                     for fmt in date_formats:
                         try:
                             date_obj = datetime.strptime(birthday_str, fmt)
@@ -119,145 +215,173 @@ class PortalEmployeeSyncController(http.Controller):
 
                     if date_obj:
                         employee_vals['birthday'] = date_obj.strftime('%Y-%m-%d')
-                        _logger.info(f"✅ Birthday set to: {employee_vals['birthday']}")
-                    else:
-                        _logger.warning(f"⚠️ Could not parse birthday: '{birthday_str}'")
+                        _logger.info(f"✅ Birthday: {employee_vals['birthday']}")
 
                 except Exception as e:
-                    _logger.error(f"❌ Error processing birthday: {e}")
+                    _logger.error(f"❌ Birthday error: {e}")
 
-            # PLACE OF BIRTH
+            # Place of birth
             if data.get('place_of_birth'):
                 employee_vals['place_of_birth'] = data.get('place_of_birth')
-                _logger.info(f"✓ Place of birth: {data.get('place_of_birth')}")
 
-            # MARITAL STATUS - IMPROVED MAPPING
+            # ═══════════════════════════════════════════════════════════
+            # MARITAL STATUS - WITH SHAREPOINT EXTRACTION
+            # ═══════════════════════════════════════════════════════════
             if data.get('marital'):
-                marital_value = str(data.get('marital')).lower().strip()
-                _logger.info(f"📝 Processing marital status: '{marital_value}'")
+                marital_raw = self._extract_sharepoint_value(data.get('marital'))
+                _logger.info(f"📝 Marital: RAW='{data.get('marital')}' → EXTRACTED='{marital_raw}'")
 
-                marital_mapping = {
-                    'single': 'single',
-                    'unmarried': 'single',
-                    'married': 'married',
-                    'cohabitant': 'cohabitant',
-                    'living together': 'cohabitant',
-                    'widower': 'widower',
-                    'widow': 'widower',
-                    'divorced': 'divorced',
-                }
+                if marital_raw:
+                    marital_value = str(marital_raw).lower().strip()
 
-                mapped_marital = marital_mapping.get(marital_value)
-                if mapped_marital:
-                    employee_vals['marital'] = mapped_marital
-                    _logger.info(f"✅ Marital status set to: {mapped_marital}")
-                else:
-                    _logger.warning(f"⚠️ Invalid marital status: '{marital_value}'")
+                    marital_mapping = {
+                        'single': 'single',
+                        'unmarried': 'single',
+                        'un married': 'single',
+                        'married': 'married',
+                        'cohabitant': 'cohabitant',
+                        'living together': 'cohabitant',
+                        'widower': 'widower',
+                        'widow': 'widower',
+                        'divorced': 'divorced',
+                    }
 
-            # PRIVATE EMAIL
+                    mapped_marital = marital_mapping.get(marital_value)
+                    if mapped_marital:
+                        employee_vals['marital'] = mapped_marital
+                        _logger.info(f"✅ Marital: {mapped_marital}")
+
+            # Private email
             if data.get('private_email'):
                 employee_vals['private_email'] = data.get('private_email')
-                _logger.info(f"✓ Private email: {data.get('private_email')}")
 
-            # NATIONALITY (COUNTRY) - IMPROVED SEARCH
+            # ═══════════════════════════════════════════════════════════
+            # COUNTRY - WITH SHAREPOINT EXTRACTION
+            # ═══════════════════════════════════════════════════════════
             if data.get('country_id'):
-                country_name = str(data.get('country_id')).strip()
-                _logger.info(f"📝 Processing country: '{country_name}'")
+                country_raw = self._extract_sharepoint_value(data.get('country_id'))
+                _logger.info(f"📝 Country: RAW='{data.get('country_id')}' → EXTRACTED='{country_raw}'")
 
-                # Try multiple search methods
-                country = request.env['res.country'].sudo().search([
-                    '|', '|',
-                    ('name', '=ilike', country_name),
-                    ('name', 'ilike', country_name),
-                    ('code', '=ilike', country_name)
-                ], limit=1)
+                if country_raw:
+                    country_name = str(country_raw).strip()
 
-                if country:
-                    employee_vals['country_id'] = country.id
-                    _logger.info(f"✅ Country set to: {country.name} (ID: {country.id})")
-                else:
-                    _logger.warning(f"⚠️ Country not found: '{country_name}'")
-                    # Log available countries for debugging
-                    all_countries = request.env['res.country'].sudo().search([], limit=10)
-                    _logger.info(f"📋 Sample countries: {', '.join(all_countries.mapped('name'))}")
+                    # Nationality to country mapping
+                    nationality_map = {
+                        'indian': 'India',
+                        'american': 'United States',
+                        'british': 'United Kingdom',
+                        'emirati': 'United Arab Emirates',
+                        'pakistani': 'Pakistan',
+                        'bangladeshi': 'Bangladesh',
+                        'sri lankan': 'Sri Lanka',
+                        'nepali': 'Nepal',
+                        'filipino': 'Philippines',
+                    }
 
-            # MOTHER TONGUE - FIXED WITH BETTER SEARCH AND AUTO-CREATE
+                    mapped_country = nationality_map.get(country_name.lower())
+                    if mapped_country:
+                        country_name = mapped_country
+
+                    # Search for country
+                    country = request.env['res.country'].sudo().search([
+                        ('name', '=', country_name)
+                    ], limit=1)
+
+                    if not country:
+                        country = request.env['res.country'].sudo().search([
+                            '|',
+                            ('name', 'ilike', country_name),
+                            ('code', '=ilike', country_name)
+                        ], limit=1)
+
+                    if country:
+                        employee_vals['country_id'] = country.id
+                        _logger.info(f"✅ Country: {country.name}")
+
+            # ═══════════════════════════════════════════════════════════
+            # MOTHER TONGUE - WITH SHAREPOINT EXTRACTION
+            # ═══════════════════════════════════════════════════════════
             if data.get('mother_tongue_id'):
-                lang_name = str(data.get('mother_tongue_id')).strip()
-                _logger.info(f"📝 Processing mother tongue: '{lang_name}'")
+                lang_raw = self._extract_sharepoint_value(data.get('mother_tongue_id'))
+                _logger.info(f"📝 Mother Tongue: RAW='{data.get('mother_tongue_id')}' → EXTRACTED='{lang_raw}'")
 
-                # Get all available languages first
-                available_langs = request.env['res.lang'].sudo().search([])
-                _logger.info(f"📋 Available languages in system: {', '.join(available_langs.mapped('name')[:10])}")
+                if lang_raw:
+                    lang_name = str(lang_raw).strip()
 
-                # Try multiple search patterns
-                lang = request.env['res.lang'].sudo().search([
-                    '|', '|', '|',
-                    ('name', '=ilike', lang_name),
-                    ('name', 'ilike', lang_name),
-                    ('iso_code', '=ilike', lang_name),
-                    ('code', '=ilike', lang_name)
-                ], limit=1)
+                    lang = request.env['res.lang'].sudo().search([
+                        '|', '|', '|',
+                        ('name', '=ilike', lang_name),
+                        ('name', 'ilike', lang_name),
+                        ('iso_code', '=ilike', lang_name),
+                        ('code', '=ilike', lang_name)
+                    ], limit=1)
 
-                if lang:
-                    employee_vals['mother_tongue_id'] = lang.id
-                    _logger.info(f"✅ Mother tongue set to: {lang.name} (ID: {lang.id})")
-                else:
-                    _logger.warning(f"⚠️ Language '{lang_name}' not found in Odoo")
-                    _logger.warning(f"💡 Available languages: English, Arabic, French, Spanish, etc.")
-                    _logger.warning(f"💡 Make sure '{lang_name}' is installed in Odoo (Settings → Languages)")
+                    if lang:
+                        employee_vals['mother_tongue_id'] = lang.id
+                        _logger.info(f"✅ Mother Tongue: {lang.name}")
 
-            # LANGUAGES KNOWN - FIXED WITH BETTER SEARCH
+            # ═══════════════════════════════════════════════════════════
+            # LANGUAGES KNOWN - WITH SHAREPOINT EXTRACTION
+            # ═══════════════════════════════════════════════════════════
             if data.get('language_known_ids'):
                 try:
-                    lang_string = str(data.get('language_known_ids')).strip()
-                    _logger.info(f"📝 Processing languages known: '{lang_string}'")
+                    lang_raw = self._extract_sharepoint_value(data.get('language_known_ids'))
+                    _logger.info(f"📝 Languages: RAW='{data.get('language_known_ids')}' → EXTRACTED='{lang_raw}'")
 
-                    # Split by comma and clean
-                    lang_names = [l.strip() for l in lang_string.split(',') if l.strip()]
-                    _logger.info(f"📋 Split into: {lang_names}")
+                    if lang_raw:
+                        lang_string = str(lang_raw).strip()
+                        lang_names = [l.strip() for l in lang_string.split(',') if l.strip()]
 
-                    if lang_names:
-                        # Search for each language
-                        found_langs = request.env['res.lang'].sudo()
+                        if lang_names:
+                            found_langs = request.env['res.lang'].sudo()
 
-                        for lang_name in lang_names:
-                            lang = request.env['res.lang'].sudo().search([
-                                '|', '|', '|',
-                                ('name', '=ilike', lang_name),
-                                ('name', 'ilike', lang_name),
-                                ('iso_code', '=ilike', lang_name),
-                                ('code', '=ilike', lang_name)
-                            ], limit=1)
+                            for lang_name in lang_names:
+                                lang = request.env['res.lang'].sudo().search([
+                                    '|', '|', '|',
+                                    ('name', '=ilike', lang_name),
+                                    ('name', 'ilike', lang_name),
+                                    ('iso_code', '=ilike', lang_name),
+                                    ('code', '=ilike', lang_name)
+                                ], limit=1)
 
-                            if lang:
-                                found_langs |= lang
-                                _logger.info(f"  ✓ Found: {lang.name}")
-                            else:
-                                _logger.warning(f"  ✗ Not found: {lang_name}")
+                                if lang:
+                                    found_langs |= lang
 
-                        if found_langs:
-                            employee_vals['language_known_ids'] = [(6, 0, found_langs.ids)]
-                            _logger.info(f"✅ Languages set: {', '.join(found_langs.mapped('name'))}")
-                        else:
-                            _logger.warning(f"⚠️ No languages found from: {lang_names}")
+                            if found_langs:
+                                employee_vals['language_known_ids'] = [(6, 0, found_langs.ids)]
+                                _logger.info(f"✅ Languages: {', '.join(found_langs.mapped('name'))}")
 
                 except Exception as e:
-                    _logger.error(f"❌ Error processing languages: {e}")
+                    _logger.error(f"❌ Languages error: {e}")
 
-            # CREATE EMPLOYEE
-            _logger.info(f"🚀 Creating employee with values: {json.dumps(employee_vals, default=str, indent=2)}")
-            employee = request.env['hr.employee'].sudo().create(employee_vals)
+            # ═══════════════════════════════════════════════════════════
+            # CREATE OR UPDATE
+            # ═══════════════════════════════════════════════════════════
+            _logger.info(f"📦 Values to save: {json.dumps(employee_vals, default=str, indent=2)}")
 
-            _logger.info(f"✅ Employee created successfully: {employee.name} (ID: {employee.id})")
-            _logger.info(f"========== REQUEST COMPLETE ==========\n")
+            if is_update:
+                # UPDATE
+                _logger.info(f"🔄 Updating employee ID {employee.id}")
+                employee.write(employee_vals)
+                _logger.info(f"✅ UPDATED: {employee.name} (ID: {employee.id})")
+                message = 'Employee updated successfully'
+                status = 'updated'
+            else:
+                # CREATE
+                _logger.info(f"🆕 Creating new employee")
+                employee = request.env['hr.employee'].sudo().create(employee_vals)
+                _logger.info(f"✅ CREATED: {employee.name} (ID: {employee.id})")
+                message = 'Employee created successfully'
+                status = 'created'
 
-            # RETURN DETAILED RESPONSE
+            _logger.info(f"========== COMPLETE ==========\n")
+
+            # Return response
             return self._json_response({
                 'success': True,
-                'status': 'success',
+                'status': status,
                 'employee_id': employee.id,
-                'message': 'Employee created successfully',
+                'message': message,
                 'data': {
                     'id': employee.id,
                     'name': employee.name,
@@ -281,7 +405,7 @@ class PortalEmployeeSyncController(http.Controller):
             })
 
         except Exception as e:
-            _logger.error(f"❌ Error creating employee: {str(e)}", exc_info=True)
+            _logger.error(f"❌ ERROR: {str(e)}", exc_info=True)
             return self._json_response({
                 'error': str(e),
                 'status': 500
@@ -291,7 +415,6 @@ class PortalEmployeeSyncController(http.Controller):
     def get_employees(self, **kwargs):
         """Get all employees"""
         try:
-            # Get API key from headers
             api_key = request.httprequest.headers.get('api-key') or \
                       request.httprequest.headers.get('API-Key') or \
                       request.httprequest.headers.get('Authorization', '').replace('Bearer ', '')
@@ -302,7 +425,6 @@ class PortalEmployeeSyncController(http.Controller):
                     'status': 401
                 }, 401)
 
-            # Get all employees
             employees = request.env['hr.employee'].sudo().search([])
 
             employee_list = []
@@ -332,7 +454,7 @@ class PortalEmployeeSyncController(http.Controller):
             })
 
         except Exception as e:
-            _logger.error(f"Error fetching employees: {str(e)}")
+            _logger.error(f"Error: {str(e)}")
             return self._json_response({
                 'error': str(e),
                 'status': 500
@@ -343,6 +465,7 @@ class PortalEmployeeSyncController(http.Controller):
         if not dept_name:
             return False
 
+        dept_name = dept_name.strip()
         department = request.env['hr.department'].sudo().search([
             ('name', '=', dept_name)
         ], limit=1)
@@ -351,7 +474,7 @@ class PortalEmployeeSyncController(http.Controller):
             department = request.env['hr.department'].sudo().create({
                 'name': dept_name
             })
-            _logger.info(f"Created new department: {dept_name}")
+            _logger.info(f"✨ Created department: {dept_name}")
 
         return department.id
 
@@ -360,6 +483,7 @@ class PortalEmployeeSyncController(http.Controller):
         if not job_title:
             return False
 
+        job_title = job_title.strip()
         job = request.env['hr.job'].sudo().search([
             ('name', '=', job_title)
         ], limit=1)
@@ -368,12 +492,12 @@ class PortalEmployeeSyncController(http.Controller):
             job = request.env['hr.job'].sudo().create({
                 'name': job_title
             })
-            _logger.info(f"Created new job: {job_title}")
+            _logger.info(f"✨ Created job: {job_title}")
 
         return job.id
 
     def _json_response(self, data, status=200):
-        """Return JSON response with proper headers"""
+        """Return JSON response"""
         return request.make_response(
             json.dumps(data, indent=2),
             headers=[
