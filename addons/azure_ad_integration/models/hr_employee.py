@@ -28,12 +28,12 @@ class HREmployee(models.Model):
         string="Languages Known"
     )
 
-    sharepoint_employee_id = fields.Char(
-        "SharePoint Employee ID",
-        readonly=True,
-        index=True,
-        help="Unique identifier from SharePoint"
-    )
+    # sharepoint_employee_id = fields.Char(
+    #     "SharePoint Employee ID",
+    #     readonly=True,
+    #     index=True,
+    #     help="Unique identifier from SharePoint"
+    # )
 
     @api.model_create_multi
     def create(self, vals_list):
