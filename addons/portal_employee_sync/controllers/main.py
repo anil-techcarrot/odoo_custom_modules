@@ -29,15 +29,15 @@ class PortalEmployeeSyncController(http.Controller):
         if isinstance(field_data, dict):
             value = field_data.get('Value') or field_data.get('value')
             if value:
-                _logger.info(f"  📦 {field_name}: Extracted '{value}' from object")
+                _logger.info(f"   {field_name}: Extracted '{value}' from object")
                 return str(value).strip()
             else:
-                _logger.warning(f"  ⚠️ {field_name}: Object has no 'Value' key: {field_data}")
+                _logger.warning(f"   {field_name}: Object has no 'Value' key: {field_data}")
                 return None
 
         # If it's already a string
         value = str(field_data).strip()
-        _logger.info(f"  📝 {field_name}: Got string value '{value}'")
+        _logger.info(f"   {field_name}: Got string value '{value}'")
         return value if value else None
 
     @http.route('/api/employees', type='http', auth='public', methods=['POST'], csrf=False, cors='*')
@@ -64,7 +64,7 @@ class PortalEmployeeSyncController(http.Controller):
                 else:
                     data = request.httprequest.form.to_dict()
 
-                _logger.info(f"📥 Received data: {json.dumps(data, indent=2)}")
+                _logger.info(f" Received data: {json.dumps(data, indent=2)}")
             except Exception as e:
                 return self._json_response({
                     'error': f'Invalid JSON: {str(e)}',
@@ -89,7 +89,7 @@ class PortalEmployeeSyncController(http.Controller):
                     ('sharepoint_employee_id', '=', str(data.get('employee_id')))
                 ], limit=1)
                 if existing_employee:
-                    _logger.info(f"✅ Found existing employee by SharePoint ID: {data.get('employee_id')}")
+                    _logger.info(f" Found existing employee by SharePoint ID: {data.get('employee_id')}")
 
             # Method 2: Search by Name (if no employee_id provided)
             if not existing_employee and data.get('name'):
@@ -97,7 +97,7 @@ class PortalEmployeeSyncController(http.Controller):
                     ('name', '=', data.get('name'))
                 ], limit=1)
                 if existing_employee:
-                    _logger.info(f"✅ Found existing employee by Name: {data.get('name')}")
+                    _logger.info(f" Found existing employee by Name: {data.get('name')}")
 
             # Method 3: Search by first/last name combination
             if not existing_employee:
@@ -107,7 +107,7 @@ class PortalEmployeeSyncController(http.Controller):
                         ('employee_last_name', '=', data.get('employee_last_name'))
                     ], limit=1)
                     if existing_employee:
-                        _logger.info(f"✅ Found existing employee by First+Last Name")
+                        _logger.info(f" Found existing employee by First+Last Name")
 
             # BASE EMPLOYEE DATA
             employee_vals = {
@@ -124,9 +124,9 @@ class PortalEmployeeSyncController(http.Controller):
             # Only set work_email if employee doesn't exist yet
             if not existing_employee:
                 employee_vals['work_email'] = data.get('email')
-                _logger.info(f"📧 Setting work_email for NEW employee: {data.get('email')}")
+                _logger.info(f" Setting work_email for NEW employee: {data.get('email')}")
             else:
-                _logger.info(f"📧 SKIPPING work_email update - employee exists")
+                _logger.info(f" SKIPPING work_email update - employee exists")
 
             # SHAREPOINT NAME FIELDS
             if data.get('employee_first_name'):
@@ -145,7 +145,7 @@ class PortalEmployeeSyncController(http.Controller):
             # GENDER - HANDLES SHAREPOINT OBJECTS
             # ============================================
             if data.get('sex'):
-                _logger.info(f"📝 Processing GENDER field...")
+                _logger.info(f" Processing GENDER field...")
                 gender_raw = self._extract_sharepoint_value(data.get('sex'), 'Gender')
 
                 if gender_raw:
@@ -161,13 +161,13 @@ class PortalEmployeeSyncController(http.Controller):
                     mapped_gender = gender_mapping.get(gender_value)
                     if mapped_gender:
                         employee_vals['sex'] = mapped_gender
-                        _logger.info(f"✅ Gender set to: {mapped_gender}")
+                        _logger.info(f" Gender set to: {mapped_gender}")
                     else:
-                        _logger.warning(f"⚠️ Invalid gender value: '{gender_value}'")
+                        _logger.warning(f" Invalid gender value: '{gender_value}'")
                 else:
-                    _logger.warning(f"⚠️ Could not extract gender value")
+                    _logger.warning(f" Could not extract gender value")
             else:
-                _logger.info(f"ℹ️ No 'sex' field in data")
+                _logger.info(f" No 'sex' field in data")
 
             # ============================================
             # BIRTHDAY - MULTIPLE FORMAT SUPPORT
@@ -176,7 +176,7 @@ class PortalEmployeeSyncController(http.Controller):
                 try:
                     from datetime import datetime
                     birthday_str = str(data.get('birthday')).strip()
-                    _logger.info(f"📝 Processing birthday: '{birthday_str}'")
+                    _logger.info(f" Processing birthday: '{birthday_str}'")
 
                     date_obj = None
                     date_formats = [
@@ -198,14 +198,14 @@ class PortalEmployeeSyncController(http.Controller):
 
                     if date_obj:
                         employee_vals['birthday'] = date_obj.strftime('%Y-%m-%d')
-                        _logger.info(f"✅ Birthday set to: {employee_vals['birthday']}")
+                        _logger.info(f" Birthday set to: {employee_vals['birthday']}")
                     else:
-                        _logger.warning(f"⚠️ Could not parse birthday: '{birthday_str}'")
+                        _logger.warning(f" Could not parse birthday: '{birthday_str}'")
 
                 except Exception as e:
-                    _logger.error(f"❌ Error processing birthday: {e}")
+                    _logger.error(f" Error processing birthday: {e}")
             else:
-                _logger.info(f"ℹ️ No 'birthday' field in data")
+                _logger.info(f" No 'birthday' field in data")
 
             # PLACE OF BIRTH
             if data.get('place_of_birth'):
@@ -216,7 +216,7 @@ class PortalEmployeeSyncController(http.Controller):
             # MARITAL STATUS - HANDLES SHAREPOINT OBJECTS
             # ============================================
             if data.get('marital'):
-                _logger.info(f"📝 Processing MARITAL STATUS field...")
+                _logger.info(f" Processing MARITAL STATUS field...")
                 marital_raw = self._extract_sharepoint_value(data.get('marital'), 'Marital')
 
                 if marital_raw:
@@ -236,13 +236,13 @@ class PortalEmployeeSyncController(http.Controller):
                     mapped_marital = marital_mapping.get(marital_value)
                     if mapped_marital:
                         employee_vals['marital'] = mapped_marital
-                        _logger.info(f"✅ Marital status set to: {mapped_marital}")
+                        _logger.info(f" Marital status set to: {mapped_marital}")
                     else:
-                        _logger.warning(f"⚠️ Invalid marital status: '{marital_value}'")
+                        _logger.warning(f" Invalid marital status: '{marital_value}'")
                 else:
-                    _logger.warning(f"⚠️ Could not extract marital value")
+                    _logger.warning(f" Could not extract marital value")
             else:
-                _logger.info(f"ℹ️ No 'marital' field in data")
+                _logger.info(f" No 'marital' field in data")
 
             # PRIVATE EMAIL
             if data.get('private_email'):
@@ -254,7 +254,7 @@ class PortalEmployeeSyncController(http.Controller):
             # ============================================
             if data.get('country_id'):
                 country_name = str(data.get('country_id')).strip()
-                _logger.info(f"📝 Processing country: '{country_name}'")
+                _logger.info(f" Processing country: '{country_name}'")
 
                 country = request.env['res.country'].sudo().search([
                     '|', '|',
@@ -265,17 +265,17 @@ class PortalEmployeeSyncController(http.Controller):
 
                 if country:
                     employee_vals['country_id'] = country.id
-                    _logger.info(f"✅ Country set to: {country.name} (ID: {country.id})")
+                    _logger.info(f" Country set to: {country.name} (ID: {country.id})")
                 else:
-                    _logger.warning(f"⚠️ Country not found: '{country_name}'")
+                    _logger.warning(f" Country not found: '{country_name}'")
             else:
-                _logger.info(f"ℹ️ No 'country_id' field in data")
+                _logger.info(f" No 'country_id' field in data")
 
             # ============================================
             # MOTHER TONGUE - HANDLES SHAREPOINT OBJECTS
             # ============================================
             if data.get('mother_tongue_id'):
-                _logger.info(f"📝 Processing MOTHER TONGUE field...")
+                _logger.info(f" Processing MOTHER TONGUE field...")
                 lang_raw = self._extract_sharepoint_value(data.get('mother_tongue_id'), 'Mother Tongue')
 
                 if lang_raw:
@@ -289,26 +289,26 @@ class PortalEmployeeSyncController(http.Controller):
 
                     if lang:
                         employee_vals['mother_tongue_id'] = lang.id
-                        _logger.info(f"✅ Mother tongue set to: {lang.name} (ID: {lang.id})")
+                        _logger.info(f" Mother tongue set to: {lang.name} (ID: {lang.id})")
                     else:
-                        _logger.warning(f"⚠️ Language '{lang_raw}' not found in Odoo")
+                        _logger.warning(f" Language '{lang_raw}' not found in Odoo")
                 else:
-                    _logger.warning(f"⚠️ Could not extract mother tongue value")
+                    _logger.warning(f" Could not extract mother tongue value")
             else:
-                _logger.info(f"ℹ️ No 'mother_tongue_id' field in data")
+                _logger.info(f" No 'mother_tongue_id' field in data")
 
             # ============================================
             # LANGUAGES KNOWN - HANDLES SHAREPOINT OBJECTS
             # ============================================
             if data.get('language_known_ids'):
                 try:
-                    _logger.info(f"📝 Processing LANGUAGES KNOWN field...")
+                    _logger.info(f" Processing LANGUAGES KNOWN field...")
                     lang_raw = self._extract_sharepoint_value(data.get('language_known_ids'), 'Languages Known')
 
                     if lang_raw:
                         # Split by comma
                         lang_names = [l.strip() for l in lang_raw.split(',') if l.strip()]
-                        _logger.info(f"📋 Split into: {lang_names}")
+                        _logger.info(f" Split into: {lang_names}")
 
                         if lang_names:
                             found_langs = request.env['res.lang'].sudo()
@@ -330,16 +330,16 @@ class PortalEmployeeSyncController(http.Controller):
 
                             if found_langs:
                                 employee_vals['language_known_ids'] = [(6, 0, found_langs.ids)]
-                                _logger.info(f"✅ Languages set: {', '.join(found_langs.mapped('name'))}")
+                                _logger.info(f" Languages set: {', '.join(found_langs.mapped('name'))}")
                             else:
-                                _logger.warning(f"⚠️ No languages found from: {lang_names}")
+                                _logger.warning(f" No languages found from: {lang_names}")
                     else:
-                        _logger.warning(f"⚠️ Could not extract languages value")
+                        _logger.warning(f" Could not extract languages value")
 
                 except Exception as e:
-                    _logger.error(f"❌ Error processing languages: {e}")
+                    _logger.error(f" Error processing languages: {e}")
             else:
-                _logger.info(f"ℹ️ No 'language_known_ids' field in data")
+                _logger.info(f" No 'language_known_ids' field in data")
 
             # ============================================
             # CREATE OR UPDATE EMPLOYEE
@@ -352,19 +352,19 @@ class PortalEmployeeSyncController(http.Controller):
                 existing_employee.write(employee_vals)
                 employee = existing_employee
 
-                _logger.info(f"✅ Employee UPDATED successfully")
+                _logger.info(f" Employee UPDATED successfully")
             else:
                 # CREATE NEW EMPLOYEE
-                _logger.info(f"🆕 Creating NEW employee")
+                _logger.info(f" Creating NEW employee")
                 _logger.info(f"   Values: {json.dumps(employee_vals, default=str, indent=2)}")
 
                 employee = request.env['hr.employee'].sudo().create(employee_vals)
 
-                _logger.info(f"✅ Employee CREATED successfully (ID: {employee.id})")
+                _logger.info(f" Employee CREATED successfully (ID: {employee.id})")
 
             # Log final employee state
             _logger.info(f"")
-            _logger.info(f"📊 FINAL EMPLOYEE DATA:")
+            _logger.info(f" FINAL EMPLOYEE DATA:")
             _logger.info(f"   Name: {employee.name}")
             _logger.info(f"   Email: {employee.work_email or 'Not set'}")
             _logger.info(f"   Gender: {employee.sex or 'Not set'}")
@@ -408,7 +408,7 @@ class PortalEmployeeSyncController(http.Controller):
             })
 
         except Exception as e:
-            _logger.error(f"❌ CRITICAL ERROR: {str(e)}", exc_info=True)
+            _logger.error(f" CRITICAL ERROR: {str(e)}", exc_info=True)
             return self._json_response({
                 'error': str(e),
                 'status': 500
